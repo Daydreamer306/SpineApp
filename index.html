@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>智脊未来 - 儿童脊柱健康智能监测 APP</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
+        body { background-color: #f5f7fa; color: #333; height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
+        
+        /* 顶部导航，还原 APP 感觉 */
+        header { background: #ffffff; padding: 15px 20px; text-align: center; box-shadow: 0 2px 10px rgba(0,0,0,0.05); z-index: 10; }
+        header h1 { font-size: 18px; color: #2c3e50; font-weight: 600; }
+        
+        /* 核心内容区 (3D画布 + 数据悬浮) */
+        .main-content { flex: 1; position: relative; width: 100%; display: flex; justify-content: center; align-items: center; }
+        
+        /* 3D 渲染区域的容器 */
+        #canvas-container { position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 1; touch-action: none; }
+        
+        /* 数据悬浮卡片 (从设计图提取的占位数据) */
+        .info-card { position: absolute; background: rgba(255, 255, 255, 0.9); backdrop-filter: blur(10px); padding: 12px 16px; border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.08); z-index: 5; border: 1px solid rgba(255,255,255,0.5); }
+        .info-card h3 { font-size: 14px; color: #5c6bc0; margin-bottom: 5px; }
+        .info-card p { font-size: 13px; color: #555; line-height: 1.5; }
+        
+        /* 特别高亮 Cobb 角 */
+        .highlight-cobb { color: #e53935; font-weight: bold; }
+        
+        /* 不同卡片的位置 */
+        .card-top-left { top: 20px; left: 15px; }
+        .card-bottom-right { bottom: 80px; right: 15px; }
+        
+        /* 交互提示信息 */
+        .interaction-hint { position: absolute; bottom: 20px; width: 100%; text-align: center; font-size: 12px; color: #888; z-index: 5; pointer-events: none; }
+        
+        /* 底部导航 (装饰性，增强 APP 感觉) */
+        footer { background: #ffffff; display: flex; justify-content: space-around; padding: 10px 0 20px 0; box-shadow: 0 -2px 10px rgba(0,0,0,0.05); z-index: 10; }
+        .tab { text-align: center; color: #999; font-size: 12px; }
+        .tab.active { color: #5c6bc0; }
+        .tab-icon { font-size: 20px; margin-bottom: 4px; display: block; }
+    </style>
+</head>
+<body>
+
+    <header>
+        <h1>智脊未来</h1>
+    </header>
+
+    <div class="main-content">
+        <div id="canvas-container"></div>
+        
+        <div class="info-card card-top-left">
+            <h3>检测报告概览</h3>
+            <p>上次检测: 2025-02-20</p>
+            <p>姓名: 匿名用户</p>
+            <p>评估结果: 轻度侧弯</p>
+            <p>建议锻炼: 每日一次矫正操</p>
+        </div>
+
+        <div class="info-card card-bottom-right">
+            <h3>诊断与评估</h3>
+            <p>Cobb角测量结果:</p>
+            <p class="highlight-cobb">T11-T12段: 22°</p>
+            <p>诊断结果: 胸腰段右侧弯</p>
+        </div>
+
+        <div class="interaction-hint">👆 使用单指旋转，双指缩放查看脊柱详情</div>
+    </div>
+
+    <footer>
+        <div class="tab active"><span class="tab-icon">📱</span>检测</div>
+        <div class="tab"><span class="tab-icon">📄</span>报告</div>
+        <div class="tab"><span class="tab-icon">🏃</span>训练</div>
+        <div class="tab"><span class="tab-icon">👤</span>我的</div>
+    </footer>
+
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+                "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+            }
+        }
+    </script>
+
+    <script type="module">
+        import * as THREE from 'three';
+        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+        // 核心：引入 STLLoader，而不是 GLTFLoader
+        import { STLLoader } from 'three/addons/loaders/STLLoader.js';
+
+        // 1. 初始化场景、相机、渲染器
+        const container = document.getElementById('canvas-container');
+        const scene = new THREE.Scene();
+        scene.background = null; // 设置背景为透明，以便露出外层网页背景
+
+        const camera = new THREE.PerspectiveCamera(45, container.clientWidth / container.clientHeight, 0.1, 1000);
+        camera.position.set(0, 0, 100); // 初始相机距离，可能需要根据模型大小调整
+
+        const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+        renderer.setSize(container.clientWidth, container.clientHeight);
+        renderer.setPixelRatio(window.devicePixelRatio); // 适配高清屏幕
+        container.appendChild(renderer.domElement);
+
+        // 2. 添加灯光，这是让模型有立体感的关键
+        const ambientLight = new THREE.AmbientLight(0xffffff, 0.8);
+        scene.add(ambientLight);
+        
+        const directionalLight = new THREE.DirectionalLight(0xffffff, 1.0);
+        directionalLight.position.set(10, 10, 10);
+        scene.add(directionalLight);
+        
+        const directionalLight2 = new THREE.DirectionalLight(0xffffff, 0.5);
+        directionalLight2.position.set(-10, -10, -10);
+        scene.add(directionalLight2);
+
+        // 3. 定义一种充满“医疗科技感”的材质
+        // 偏浅蓝，带半透明，类似X光片
+        const medicalMaterial = new THREE.MeshStandardMaterial({ 
+            color: 0x4fc3f7,      // 浅蓝色
+            roughness: 0.3,       // 稍微光滑一点
+            metalness: 0.2,       // 带一点金属质感
+            transparent: true,    // 开启透明
+            opacity: 0.85         // 类似X光的半透明感
+        });
+
+        // 4. 加载你导出的 STL 模型
+        const loader = new STLLoader();
+        // 如果你的文件名字不是 spine_model.STL，就在这里修改
+        loader.load( 'spine_model.STL', function ( geometry ) {
+
+            // 非常关键的一步：让模型的几何体自动居中
+            geometry.center(); 
+            
+            // 生成网格模型
+            const spineMesh = new THREE.Mesh( geometry, medicalMaterial );
+            
+            // 重要：根据 SW 导出的尺寸在网页上进行缩放。
+            // 例如，如果你的模型单位是毫米，需要缩小：spineMesh.scale.set(0.01, 0.01, 0.01);
+            // 这里我默认设为1，如果看不见或者超级大，就在这里修改。
+            // spineMesh.scale.set(1, 1, 1); 
+            spineMesh.scale.set(0.1, 0.1, 0.1);
+            
+            // 为了让模型站立起来，通常需要旋转一下（SolidWorks 和 Three.js 坐标系不同）
+            // spineMesh.rotation.x = -Math.PI / 2; 
+            spineMesh.rotation.y = -Math.PI / 2; 
+
+            scene.add( spineMesh );
+
+        }, 
+        // 这里是加载进度的回调，可选，控制台会输出
+        function ( xhr ) {
+            console.log( (xhr.loaded / xhr.total * 100) + '% 已加载' );
+        },
+        // 如果加载出错了，这里会提示
+        function ( error ) {
+            console.error( '加载模型时出错：', error );
+            alert('未能加载模型，请确保 spine_model.stl 文件和当前网页在同一个文件夹里');
+        });
+
+        // 5. 添加交互控制器 (允许手指旋转、双指缩放)
+        const controls = new OrbitControls(camera, renderer.domElement);
+        controls.enableDamping = true; // 增加滑动惯性，手感更好
+        controls.dampingFactor = 0.05;
+        controls.enablePan = false; // 禁用平移，只允许旋转和缩放，增强 APP 感觉
+
+        // 6. 动画循环，Three.js 的生命线
+        function animate() {
+            requestAnimationFrame(animate);
+            controls.update(); // 如果启用了damping，必须在动画循环里调用
+            renderer.render(scene, camera);
+        }
+        animate();
+
+        // 7. 响应窗口大小改变，确保始终占满屏幕
+        window.addEventListener('resize', () => {
+            camera.aspect = container.clientWidth / container.clientHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(container.clientWidth, container.clientHeight);
+        });
+    </script>
+</body>
+</html>
